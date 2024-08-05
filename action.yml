@@ -1,0 +1,99 @@
+name: Action Install Yocto Host Dependency
+description: Install Yocto Host Dependency
+
+# Requires
+# vars.PUBLIC_SSH_KEY
+# secrets.PRIVATE_SSH_KEY
+# secrets.PRIVATE_PASSWORD_SUDO
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install local path
+      shell: bash
+      run: |
+        echo "::add-mask::$HOME"
+        local_path=$HOME/.local/bin
+        mkdir -p $local_path
+        echo "PATH=$local_path:$PATH" >> $GITHUB_ENV
+    - name: Install ssh keys
+      if: ${{ secrets.PRIVATE_SSH_KEY != '' && vars.PUBLIC_SSH_KEY != '' }}
+      shell: bash
+      run: |
+        cat >id_ed25519.pub <<EOF
+        ${{ vars.PUBLIC_SSH_KEY }}
+        EOF
+        cat >id_ed25519 <<EOF
+        ${{ secrets.PRIVATE_SSH_KEY }}
+        EOF
+        cat >ssh_config <<EOF
+        Host github.com
+          RequestTTY no
+          IdentitiesOnly yes
+          IdentityFile $HOME/.ssh/id_ed25519
+        EOF
+        install -d -m 0700 $HOME/.ssh
+        install -D -m 0600 id_ed25519 $HOME/.ssh/id_ed25519
+        install -D -m 0644 id_ed25519.pub $HOME/.ssh/id_ed25519.pub
+        install -D -m 0644 ssh_config $HOME/.ssh/config
+        ssh git@github.com || true
+    - name: Install repo tool
+      shell: bash
+      run: |
+        curl https://storage.googleapis.com/git-repo-downloads/repo > $HOME/.local/bin/repo
+        chmod a+rx $HOME/.local/bin/repo
+        [ -n "$(command -v repo)" ] || exit 1
+    - name: Install host dependency
+      shell: bash
+      if: ${{ secrets.PRIVATE_PASSWORD_SUDO != '' }}
+      run: |
+        source /etc/os-release
+        case $ID in
+        almalinux*)
+          printf "${{ secrets.PRIVATE_PASSWORD_SUDO }}\n" | sudo -S bash -c "
+            dnf install -y epel-release
+            yum install -y dnf-plugins-core
+            dnf config-manager --set-enabled crb
+            dnf makecache
+            dnf upgrade -y
+            dnf install -y gawk make wget tar bzip2 gzip python3 unzip perl patch \
+                diffutils diffstat git cpp gcc gcc-c++ glibc-devel texinfo chrpath \
+                ccache socat perl-Data-Dumper perl-Text-ParseWords perl-Thread-Queue \
+                python3-pip python3-GitPython python3-jinja2 python3-pexpect xz which \
+                rpcgen zstd lz4 cpio glibc-langpack-en libacl git-lfs hostname
+          "
+          ;;
+        debian* | ubuntu* )
+          printf "${{ secrets.PRIVATE_PASSWORD_SUDO }}\n" | sudo -S bash -c "
+            apt update -y
+            apt upgrade -y
+            apt install -y gawk wget git diffstat unzip texinfo gcc build-essential \
+                chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils \
+                iputils-ping python3-git python3-jinja2 python3-subunit zstd liblz4-tool \
+                file locales libacl1 git-lfs make libxml2-utils
+            locale-gen en_US.UTF-8
+          "
+          ;;
+        fedora* )
+          printf "${{ secrets.PRIVATE_PASSWORD_SUDO }}\n" | sudo -S bash -c "
+            dnf install -y gawk make wget tar bzip2 gzip python3 unzip perl patch diffutils \
+              diffstat git cpp gcc gcc-c++ glibc-devel texinfo chrpath ccache perl-Data-Dumper \
+              perl-Text-ParseWords perl-Thread-Queue perl-bignum socat python3-pexpect findutils \
+              which file cpio python python3-pip xz python3-GitPython python3-jinja2 rpcgen \
+              perl-FindBin perl-File-Compare perl-File-Copy perl-locale zstd lz4 hostname \
+              glibc-langpack-en libacl
+          "
+          ;;
+        opensuse* )
+          printf "${{ secrets.PRIVATE_PASSWORD_SUDO }}\n" | sudo -S bash -c "
+            zypper install -y python gcc gcc-c++ git chrpath make wget python-xml diffstat \
+              makeinfo python-curses patch socat python3 python3-curses tar python3-pip \
+              python3-pexpect xz which python3-Jinja2 rpcgen zstd lz4 bzip2 gzip hostname \
+              libacl1
+            pip3 install GitPython
+          "
+          ;;
+        * )
+          exit 1
+          ;;
+        esac
